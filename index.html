@@ -1,14 +1,371 @@
 <!DOCTYPE html>
-<html lang="ja">
-
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Github Pages公開練習</title>
+  <meta charset="UTF-8">
+  <title>BookLend Scanner</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1.5rem; }
+    h1 { margin-bottom: 0.5rem; }
+    fieldset { margin-bottom: 1rem; }
+    label { display: block; margin: 0.25rem 0; }
+    input, textarea, button { font-size: 1rem; }
+    table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+    th, td { border: 1px solid #ccc; padding: 0.25rem 0.5rem; font-size: 0.9rem; }
+    th { background: #f5f5f5; }
+    #app-area { margin-top: 1rem; }
+    #history-area { margin-top: 1.5rem; }
+    .small { font-size: 0.8rem; color: #666; }
+    #camera { width: 100%; max-width: 400px; height: 240px; background: #000; }
+    .row { margin-top: 0.5rem; }
+  </style>
 </head>
-
 <body>
-    <h1>こんにちは</h1>
-</body>
+  <h1>BookLend Scanner</h1>
 
+  <!-- Login / Signup -->
+  <div id="login-area">
+    <fieldset>
+      <legend>Login / Sign Up</legend>
+
+      <label>
+        Email:
+        <input type="email" id="login-email" required>
+      </label>
+
+      <label>
+        Password:
+        <input type="password" id="login-password">
+      </label>
+
+      <button id="signup-btn">Sign Up</button>
+      <button id="login-btn">Login</button>
+
+      <p id="login-message" class="small"></p>
+    </fieldset>
+  </div>
+
+  <!-- Main App -->
+  <div id="app-area" style="display:none;">
+    <fieldset>
+      <legend>Current User</legend>
+      <p>
+        User ID: <span id="current-user-id"></span><br>
+        Email (not used for lending/return): <span id="current-email"></span>
+      </p>
+      <button id="logout-btn">Logout</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Scan ISBN (Camera)</legend>
+      <div id="camera"></div>
+      <div class="row">
+        Scanned ISBN: <span id="scanned-isbn"></span>
+      </div>
+      <button id="start-scan-btn">Start Scan</button>
+      <button id="stop-scan-btn">Stop Scan</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Book Info</legend>
+
+      <label>
+        ISBN:
+        <input type="text" id="isbn-input" placeholder="13-digit ISBN">
+      </label>
+      <button id="fetch-book-btn">Fetch Book Info</button>
+
+      <label>
+        Book title:
+        <input type="text" id="book-title">
+      </label>
+      <label>
+        Publisher:
+        <input type="text" id="book-publisher">
+      </label>
+
+      <button id="borrow-btn">Borrow</button>
+      <button id="return-btn">Return</button>
+    </fieldset>
+
+    <div id="history-area">
+      <h2>History</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Timestamp</th>
+            <th>Type</th>
+            <th>User ID</th>
+            <th>Book Title</th>
+          </tr>
+        </thead>
+        <tbody id="history-table"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Quagga2 -->
+  <script src="https://unpkg.com/@ericblade/quagga2@1.7.4/dist/quagga.min.js"></script>
+
+  <script>
+    // ---------- Storage helpers ----------
+    function loadUsers() {
+      return JSON.parse(localStorage.getItem("users") || "{}");
+    }
+    function saveUsers(users) {
+      localStorage.setItem("users", JSON.stringify(users));
+    }
+    function loadHistory() {
+      return JSON.parse(localStorage.getItem("history") || "[]");
+    }
+    function saveHistory(history) {
+      localStorage.setItem("history", JSON.stringify(history));
+    }
+
+    // ---------- Global state ----------
+    let currentUserId = null;
+    let currentEmail = null;
+    let scanning = false;
+
+    // ---------- User ID generator ----------
+    function generateUserId() {
+      return "U" + Math.random().toString(36).substring(2, 10).toUpperCase();
+    }
+
+    // ---------- History ----------
+    function addHistory(type, userId, bookTitle) {
+      const history = loadHistory();
+      history.push({
+        id: history.length + 1,
+        timestamp: new Date().toISOString(),
+        type,
+        userId,
+        book: bookTitle || ""
+      });
+      saveHistory(history);
+      renderHistory();
+    }
+
+    function renderHistory() {
+      const history = loadHistory();
+      const tbody = document.getElementById("history-table");
+      tbody.innerHTML = history.map(h => `
+        <tr>
+          <td>${h.id}</td>
+          <td>${h.timestamp}</td>
+          <td>${h.type}</td>
+          <td>${h.userId}</td>
+          <td>${h.book}</td>
+        </tr>
+      `).join("");
+    }
+
+    // ---------- UI helpers ----------
+    function showApp(email, userId) {
+      currentEmail = email;
+      currentUserId = userId;
+      document.getElementById("current-email").textContent = email;
+      document.getElementById("current-user-id").textContent = userId;
+      document.getElementById("login-area").style.display = "none";
+      document.getElementById("app-area").style.display = "block";
+      renderHistory();
+    }
+
+    function hideApp() {
+      currentEmail = null;
+      currentUserId = null;
+      document.getElementById("current-email").textContent = "";
+      document.getElementById("current-user-id").textContent = "";
+      document.getElementById("login-area").style.display = "block";
+      document.getElementById("app-area").style.display = "none";
+      stopScan();
+    }
+
+    // ---------- Signup ----------
+    document.getElementById("signup-btn").onclick = () => {
+      const email = document.getElementById("login-email").value.trim();
+      if (!email) {
+        alert("Please enter your email.");
+        return;
+      }
+
+      const users = loadUsers();
+      if (users[email]) {
+        alert("This email is already registered. Please log in.");
+        return;
+      }
+
+      const password = Math.random().toString(36).slice(-8);
+      const userId = generateUserId();
+
+      users[email] = { password, userId };
+      saveUsers(users);
+
+      addHistory("signup", userId, "");
+
+      document.getElementById("login-message").textContent =
+        `Your password: ${password} | Your User ID: ${userId}`;
+    };
+
+    // ---------- Login ----------
+    document.getElementById("login-btn").onclick = () => {
+      const email = document.getElementById("login-email").value.trim();
+      const password = document.getElementById("login-password").value.trim();
+
+      if (!email || !password) {
+        alert("Please enter email and password.");
+        return;
+      }
+
+      const users = loadUsers();
+      const user = users[email];
+
+      if (!user) {
+        alert("This email is not registered.");
+        return;
+      }
+
+      if (user.password !== password) {
+        alert("Incorrect password.");
+        return;
+      }
+
+      addHistory("login", user.userId, "");
+      showApp(email, user.userId);
+    };
+
+    // ---------- Logout ----------
+    document.getElementById("logout-btn").onclick = () => {
+      hideApp();
+    };
+
+    // 自動ログアウト（ページを閉じる/リロード）
+    window.addEventListener("beforeunload", () => {
+      // ログイン状態はメモリだけなので、何もしなくても消えるが、
+      // 明示的に UI をリセットする意図として残しておく
+      stopScan();
+    });
+
+    // ---------- Borrow / Return ----------
+    document.getElementById("borrow-btn").onclick = () => {
+      if (!currentUserId) {
+        alert("Please log in first.");
+        return;
+      }
+      const title = document.getElementById("book-title").value.trim();
+      if (!title) {
+        alert("Please enter a book title.");
+        return;
+      }
+      addHistory("borrow", currentUserId, title);
+      document.getElementById("book-title").value = "";
+    };
+
+    document.getElementById("return-btn").onclick = () => {
+      if (!currentUserId) {
+        alert("Please log in first.");
+        return;
+      }
+      const title = document.getElementById("book-title").value.trim();
+      if (!title) {
+        alert("Please enter a book title.");
+        return;
+      }
+      addHistory("return", currentUserId, title);
+      document.getElementById("book-title").value = "";
+    };
+
+    // ---------- ISBN → Book Info ----------
+    async function fetchBookInfo(isbn) {
+      const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}`;
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        const info = data.items && data.items[0] && data.items[0].volumeInfo;
+        return info || null;
+      } catch (e) {
+        console.error(e);
+        return null;
+      }
+    }
+
+    document.getElementById("fetch-book-btn").onclick = async () => {
+      const isbn = document.getElementById("isbn-input").value.replace(/\D/g, "");
+      if (isbn.length !== 13) {
+        alert("Please enter a 13-digit ISBN.");
+        return;
+      }
+      const info = await fetchBookInfo(isbn);
+      if (!info) {
+        alert("Book not found.");
+        return;
+      }
+      document.getElementById("book-title").value = info.title || "";
+      document.getElementById("book-publisher").value = info.publisher || "";
+    };
+
+    // ---------- Quagga (Camera Scan) ----------
+    function startScan() {
+      if (scanning) return;
+      scanning = true;
+
+      Quagga.init({
+        inputStream: {
+          type: "LiveStream",
+          target: document.querySelector('#camera'),
+          constraints: {
+            facingMode: "environment",
+            frameRate: 10
+          }
+        },
+        decoder: {
+          readers: ["ean_reader"] // EAN-13 / ISBN-13
+        },
+        locate: true
+      }, err => {
+        if (err) {
+          console.error(err);
+          scanning = false;
+          return;
+        }
+        Quagga.start();
+      });
+
+      Quagga.onDetected(onDetectedHandler);
+    }
+
+    function stopScan() {
+      if (!scanning) return;
+      scanning = false;
+      try {
+        Quagga.stop();
+      } catch (e) {
+        console.warn(e);
+      }
+      Quagga.offDetected(onDetectedHandler);
+    }
+
+    function onDetectedHandler(result) {
+      const code = result.codeResult.code;
+      document.getElementById("scanned-isbn").textContent = code;
+      document.getElementById("isbn-input").value = code;
+      // 一旦停止（連続検出防止）
+      stopScan();
+    }
+
+    document.getElementById("start-scan-btn").onclick = () => {
+      if (!currentUserId) {
+        alert("Please log in first.");
+        return;
+      }
+      startScan();
+    };
+    document.getElementByIdふ("stop-scan-btn").onclick = () => {
+      stopScan();
+    };
+
+    // ---------- Initial render ----------
+    renderHistory();
+  </script>
+</body>
 </html>
