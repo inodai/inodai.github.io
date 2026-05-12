@@ -39,6 +39,7 @@
 
       <button id="signup-btn">Sign Up</button>
       <button id="login-btn">Login</button>
+      <button id="admin-login-btn">Admin Login</button>
 
       <p id="login-message" class="small"></p>
     </fieldset>
@@ -104,35 +105,80 @@
     </div>
   </div>
 
+  <!-- Admin Area -->
+  <div id="admin-area" style="display:none;">
+    <h2>Admin History View</h2>
+    <button id="admin-logout-btn">Logout</button>
+
+    <h3>User List</h3>
+    <button id="show-users-btn">Show Users</button>
+    <table id="user-table">
+      <thead>
+        <tr>
+          <th>Email</th>
+          <th>User ID</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <h3>User Management</h3>
+    <label>
+      User Email:
+      <input type="text" id="admin-user-email" placeholder="email@example.com">
+    </label>
+    <button id="admin-delete-user-btn">Delete User</button>
+    <button id="admin-reset-password-btn">Reset Password</button>
+    <p id="admin-user-message" class="small"></p>
+
+    <h3>Search History</h3>
+    <input type="text" id="history-search" placeholder="Keyword (title, userId, type)">
+    <input type="date" id="history-date">
+    <select id="history-type">
+      <option value="">All</option>
+      <option value="borrow">Borrow</option>
+      <option value="return">Return</option>
+      <option value="login">Login</option>
+      <option value="signup">Signup</option>
+    </select>
+    <button id="search-history-btn">Search</button>
+
+    <h3>Export</h3>
+    <button id="export-csv-btn">Export CSV</button>
+
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Timestamp</th>
+          <th>Type</th>
+          <th>User ID</th>
+          <th>Book Title</th>
+        </tr>
+      </thead>
+      <tbody id="admin-history-table"></tbody>
+    </table>
+  </div>
+
   <!-- Quagga2 -->
   <script src="https://unpkg.com/@ericblade/quagga2@1.7.4/dist/quagga.min.js"></script>
 
   <script>
-    // ---------- Storage helpers ----------
-    function loadUsers() {
-      return JSON.parse(localStorage.getItem("users") || "{}");
-    }
-    function saveUsers(users) {
-      localStorage.setItem("users", JSON.stringify(users));
-    }
-    function loadHistory() {
-      return JSON.parse(localStorage.getItem("history") || "[]");
-    }
-    function saveHistory(history) {
-      localStorage.setItem("history", JSON.stringify(history));
-    }
+    /* --- Storage helpers --- */
+    function loadUsers() { return JSON.parse(localStorage.getItem("users") || "{}"); }
+    function saveUsers(users) { localStorage.setItem("users", JSON.stringify(users)); }
+    function loadHistory() { return JSON.parse(localStorage.getItem("history") || "[]"); }
+    function saveHistory(history) { localStorage.setItem("history", JSON.stringify(history)); }
 
-    // ---------- Global state ----------
     let currentUserId = null;
     let currentEmail = null;
     let scanning = false;
 
-    // ---------- User ID generator ----------
     function generateUserId() {
       return "U" + Math.random().toString(36).substring(2, 10).toUpperCase();
     }
 
-    // ---------- History ----------
+    /* --- History --- */
     function addHistory(type, userId, bookTitle) {
       const history = loadHistory();
       history.push({
@@ -160,7 +206,7 @@
       `).join("");
     }
 
-    // ---------- UI helpers ----------
+    /* --- UI helpers --- */
     function showApp(email, userId) {
       currentEmail = email;
       currentUserId = userId;
@@ -168,32 +214,33 @@
       document.getElementById("current-user-id").textContent = userId;
       document.getElementById("login-area").style.display = "none";
       document.getElementById("app-area").style.display = "block";
+      document.getElementById("admin-area").style.display = "none";
       renderHistory();
+    }
+
+    function showAdminView() {
+      document.getElementById("login-area").style.display = "none";
+      document.getElementById("app-area").style.display = "none";
+      document.getElementById("admin-area").style.display = "block";
+      renderAdminHistory();
     }
 
     function hideApp() {
       currentEmail = null;
       currentUserId = null;
-      document.getElementById("current-email").textContent = "";
-      document.getElementById("current-user-id").textContent = "";
       document.getElementById("login-area").style.display = "block";
       document.getElementById("app-area").style.display = "none";
+      document.getElementById("admin-area").style.display = "none";
       stopScan();
     }
 
-    // ---------- Signup ----------
+    /* --- Signup --- */
     document.getElementById("signup-btn").onclick = () => {
       const email = document.getElementById("login-email").value.trim();
-      if (!email) {
-        alert("Please enter your email.");
-        return;
-      }
+      if (!email) return alert("Please enter your email.");
 
       const users = loadUsers();
-      if (users[email]) {
-        alert("This email is already registered. Please log in.");
-        return;
-      }
+      if (users[email]) return alert("Already registered.");
 
       const password = Math.random().toString(36).slice(-8);
       const userId = generateUserId();
@@ -207,104 +254,83 @@
         `Your password: ${password} | Your User ID: ${userId}`;
     };
 
-    // ---------- Login ----------
+    /* --- Login --- */
     document.getElementById("login-btn").onclick = () => {
       const email = document.getElementById("login-email").value.trim();
       const password = document.getElementById("login-password").value.trim();
 
-      if (!email || !password) {
-        alert("Please enter email and password.");
-        return;
-      }
-
       const users = loadUsers();
       const user = users[email];
 
-      if (!user) {
-        alert("This email is not registered.");
-        return;
-      }
-
-      if (user.password !== password) {
-        alert("Incorrect password.");
-        return;
-      }
+      if (!user) return alert("Not registered.");
+      if (user.password !== password) return alert("Incorrect password.");
 
       addHistory("login", user.userId, "");
       showApp(email, user.userId);
     };
 
-    // ---------- Logout ----------
-    document.getElementById("logout-btn").onclick = () => {
-      hideApp();
+    /* --- Admin Login --- */
+    document.getElementById("admin-login-btn").onclick = () => {
+      const email = document.getElementById("login-email").value.trim();
+      const password = document.getElementById("login-password").value.trim();
+
+      if (email === "admin@example.com" && password === "admin1234") {
+        showAdminView();
+      } else {
+        alert("Admin login failed.");
+      }
     };
 
-    // 自動ログアウト（ページを閉じる/リロード）
-    window.addEventListener("beforeunload", () => {
-      // ログイン状態はメモリだけなので、何もしなくても消えるが、
-      // 明示的に UI をリセットする意図として残しておく
-      stopScan();
-    });
+    /* --- Logout --- */
+    document.getElementById("logout-btn").onclick = hideApp;
+    document.getElementById("admin-logout-btn").onclick = hideApp;
 
-    // ---------- Borrow / Return ----------
+    window.addEventListener("beforeunload", stopScan);
+
+    /* --- Borrow / Return --- */
     document.getElementById("borrow-btn").onclick = () => {
-      if (!currentUserId) {
-        alert("Please log in first.");
-        return;
-      }
+      if (!currentUserId) return alert("Login first.");
       const title = document.getElementById("book-title").value.trim();
-      if (!title) {
-        alert("Please enter a book title.");
-        return;
-      }
+      if (!title) return alert("Enter title.");
       addHistory("borrow", currentUserId, title);
       document.getElementById("book-title").value = "";
     };
 
     document.getElementById("return-btn").onclick = () => {
-      if (!currentUserId) {
-        alert("Please log in first.");
-        return;
-      }
+      if (!currentUserId) return alert("Login first.");
       const title = document.getElementById("book-title").value.trim();
-      if (!title) {
-        alert("Please enter a book title.");
-        return;
-      }
+      if (!title) return alert("Enter title.");
       addHistory("return", currentUserId, title);
       document.getElementById("book-title").value = "";
     };
 
-    // ---------- ISBN → Book Info ----------
+    /* --- ISBN Fetch --- */
     async function fetchBookInfo(isbn) {
-      const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}`;
+      const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`;
       try {
         const res = await fetch(url);
         const data = await res.json();
-        const info = data.items && data.items[0] && data.items[0].volumeInfo;
+        const info = data.items?.[0]?.volumeInfo;
         return info || null;
-      } catch (e) {
-        console.error(e);
+      } catch {
         return null;
       }
     }
 
     document.getElementById("fetch-book-btn").onclick = async () => {
       const isbn = document.getElementById("isbn-input").value.replace(/\D/g, "");
-      if (isbn.length !== 13) {
-        alert("Please enter a 13-digit ISBN.");
-        return;
-      }
+      if (isbn.length !== 13) return alert("Enter 13-digit ISBN.");
+
       const info = await fetchBookInfo(isbn);
-      if (!info) {
-        alert("Book not found.");
-        return;
-      }
+      if (!info) return alert("Book not found.");
+
       document.getElementById("book-title").value = info.title || "";
       document.getElementById("book-publisher").value = info.publisher || "";
     };
 
-    // ---------- Quagga (Camera Scan) ----------
+    /* --- QuaggaJS --- */
+    Quagga.onDetected(onDetectedHandler);
+
     function startScan() {
       if (scanning) return;
       scanning = true;
@@ -313,58 +339,135 @@
         inputStream: {
           type: "LiveStream",
           target: document.querySelector('#camera'),
-          constraints: {
-            facingMode: "environment",
-            frameRate: 10
-          }
+          constraints: { facingMode: "environment", frameRate: 10 }
         },
-        decoder: {
-          readers: ["ean_reader"] // EAN-13 / ISBN-13
-        },
+        decoder: { readers: ["ean_reader"] },
         locate: true
       }, err => {
-        if (err) {
-          console.error(err);
-          scanning = false;
-          return;
-        }
+        if (err) { scanning = false; return; }
         Quagga.start();
       });
-
-      Quagga.onDetected(onDetectedHandler);
     }
 
     function stopScan() {
       if (!scanning) return;
       scanning = false;
-      try {
-        Quagga.stop();
-      } catch (e) {
-        console.warn(e);
-      }
-      Quagga.offDetected(onDetectedHandler);
+      try { Quagga.stop(); } catch {}
     }
 
     function onDetectedHandler(result) {
       const code = result.codeResult.code;
       document.getElementById("scanned-isbn").textContent = code;
       document.getElementById("isbn-input").value = code;
-      // 一旦停止（連続検出防止）
       stopScan();
     }
 
     document.getElementById("start-scan-btn").onclick = () => {
-      if (!currentUserId) {
-        alert("Please log in first.");
-        return;
-      }
+      if (!currentUserId) return alert("Login first.");
       startScan();
     };
-    document.getElementByIdふ("stop-scan-btn").onclick = () => {
-      stopScan();
+    document.getElementById("stop-scan-btn").onclick = stopScan;
+
+    /* --- Admin: User List --- */
+    document.getElementById("show-users-btn").onclick = () => {
+      const users = loadUsers();
+      const tbody = document.querySelector("#user-table tbody");
+
+      tbody.innerHTML = Object.entries(users).map(([email, data]) => `
+        <tr>
+          <td>${email}</td>
+          <td>${data.userId}</td>
+        </tr>
+      `).join("");
     };
 
-    // ---------- Initial render ----------
+    /* --- Admin: User Delete --- */
+    document.getElementById("admin-delete-user-btn").onclick = () => {
+      const email = document.getElementById("admin-user-email").value.trim();
+      const users = loadUsers();
+
+      if (!users[email]) return alert("User not found.");
+
+      delete users[email];
+      saveUsers(users);
+
+      document.getElementById("admin-user-message").textContent =
+        `User ${email} deleted.`;
+
+      document.getElementById("show-users-btn").click();
+    };
+
+    /* --- Admin: Reset Password --- */
+    document.getElementById("admin-reset-password-btn").onclick = () => {
+      const email = document.getElementById("admin-user-email").value.trim();
+      const users = loadUsers();
+
+      if (!users[email]) return alert("User not found.");
+
+      const newPassword = Math.random().toString(36).slice(-8);
+      users[email].password = newPassword;
+      saveUsers(users);
+
+      document.getElementById("admin-user-message").textContent =
+        `New password for ${email}: ${newPassword}`;
+    };
+
+    /* --- Admin: Search History --- */
+    document.getElementById("search-history-btn").onclick = () => {
+      const keyword = document.getElementById("history-search").value.trim().toLowerCase();
+      const date = document.getElementById("history-date").value;
+      const type = document.getElementById("history-type").value;
+
+      const history = loadHistory();
+
+      const filtered = history.filter(h => {
+        const matchKeyword =
+          !keyword ||
+          h.book.toLowerCase().includes(keyword) ||
+          h.userId.toLowerCase().includes(keyword) ||
+          h.type.toLowerCase().includes(keyword);
+
+        const matchDate = !date || h.timestamp.startsWith(date);
+        const matchType = !type || h.type === type;
+
+        return matchKeyword && matchDate && matchType;
+      });
+
+      const tbody = document.getElementById("admin-history-table");
+      tbody.innerHTML = filtered.map(h => `
+        <tr>
+          <td>${h.id}</td>
+          <td>${h.timestamp}</td>
+          <td>${h.type}</td>
+          <td>${h.userId}</td>
+          <td>${h.book}</td>
+        </tr>
+      `).join("");
+    };
+
+    /* --- Admin: Export CSV --- */
+    document.getElementById("export-csv-btn").onclick = () => {
+      const history = loadHistory();
+
+      const header = ["ID", "Timestamp", "Type", "UserID", "Book"];
+      const rows = history.map(h => [
+        h.id, h.timestamp, h.type, h.userId, h.book
+      ]);
+
+      const csv = [header, ...rows].map(r => r.join(",")).join("\n");
+
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "history.csv";
+      a.click();
+
+      URL.revokeObjectURL(url);
+    };
+
+    /* --- Initial render --- */
     renderHistory();
   </script>
 </body>
